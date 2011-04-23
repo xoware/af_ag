@@ -46,8 +46,6 @@ struct af_alg_cipher_data
 	int tfmfd;
 	int op;
 	__u32 type;
-
-	unsigned char iv[AES_BLOCK_SIZE];
 };
 
 static int af_alg_cipher_nids[] = {
@@ -121,7 +119,6 @@ static int af_alg_aes_init_key (EVP_CIPHER_CTX *ctx, const unsigned char *key, c
 	strncpy((char *)sa.salg_name, name, strlen(name));
 
 	acd->op = -1;
-	memcpy(acd->iv, iv, AES_BLOCK_SIZE);
 
 	if( ctx->encrypt )
 		acd->type = ALG_OP_ENCRYPT;
@@ -180,6 +177,7 @@ static int af_alg_aes_ciphers(EVP_CIPHER_CTX *ctx, unsigned char *out_arg, const
 	struct iovec iov;
 	char buf[CMSG_SPACE(sizeof(acd->type)) + CMSG_SPACE(offsetof(struct af_alg_iv, iv) + AES_BLOCK_SIZE)];
 	ssize_t len;
+	unsigned char save_iv[AES_BLOCK_SIZE];
 
 	memset(buf, 0, sizeof(buf));
 
@@ -199,14 +197,16 @@ static int af_alg_aes_ciphers(EVP_CIPHER_CTX *ctx, unsigned char *out_arg, const
 	memcpy(CMSG_DATA(cmsg),&acd->type, 4);
 
 	/* set IV - or update if it was set before */
+	if(!ctx->encrypt)
+		memcpy(save_iv, in_arg + nbytes - AES_BLOCK_SIZE, AES_BLOCK_SIZE);
+
 	cmsg = CMSG_NXTHDR(&msg, cmsg);
 	cmsg->cmsg_level = SOL_ALG;
 	cmsg->cmsg_type = ALG_SET_IV;
 	cmsg->cmsg_len = CMSG_LEN(offsetof(struct af_alg_iv, iv) + AES_BLOCK_SIZE);
 	ivm = (void*)CMSG_DATA(cmsg);
 	ivm->ivlen = AES_BLOCK_SIZE;
-	memcpy(ivm->iv, acd->iv, AES_BLOCK_SIZE);
-
+	memcpy(ivm->iv, ctx->iv, AES_BLOCK_SIZE);
 
 	msg.msg_iov = &iov;
 	msg.msg_iovlen = 1;
@@ -230,7 +230,10 @@ static int af_alg_aes_ciphers(EVP_CIPHER_CTX *ctx, unsigned char *out_arg, const
 	}
 
 	/* copy IV for next iteration */
-	memcpy(acd->iv, out_arg + done - AES_BLOCK_SIZE, AES_BLOCK_SIZE);	
+	if(ctx->encrypt)
+		memcpy(ctx->iv, out_arg + done - AES_BLOCK_SIZE, AES_BLOCK_SIZE);
+	else
+		memcpy(ctx->iv, save_iv, AES_BLOCK_SIZE);
 	return 1;
 }
 
