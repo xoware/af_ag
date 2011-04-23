@@ -1,0 +1,56 @@
+AF_ALG for OpenSSL
+
+REQUIREMENTS
+  linux kernel >= 2.6.38
+  libssl-dev
+
+COMPILE
+  gcc -O3 -Wall -fPIC   -c -o e_af_alg.o e_af_alg.c
+  gcc -shared -Wl,-soname,libaf_alg.so -lcrypto -o libaf_alg.so e_af_alg.o
+
+INSTALL
+  mkdir -p /usr/lib/ssl/engines
+  cp libaf_alg.so /usr/lib/ssl/engines
+  chmod 644 /usr/lib/ssl/engines/libaf_alg.so
+
+TEST
+  openssl speed -evp aes-128-cbc -engine af_alg -elapsed
+
+CONFIGURATION - OPENSSL CONFIG
+
+-------------
+--- /etc/ssl/openssl.cnf.orig
++++ /etc/ssl/openssl.cnf
+@@ -12,6 +12,18 @@
+ #oid_file		= $ENV::HOME/.oid
+ oid_section		= new_oids
+ 
++
++openssl_conf = openssl_def
++
++[openssl_def]
++engines = openssl_engines
++
++[openssl_engines]
++af_alg = af_alg_engine
++
++[af_alg_engine]
++default_algorithms = ALL
++
+ # To use this configuration file with the "-extfile" option of the
+ # "openssl x509" utility, name here the section containing the
+ # X.509v3 extensions to use:
+-------------
+
+This will enforce loading the af_alg OpenSSL dynamic engine by default, 
+so it can be used by OpenSSH.
+Starting with OpenSSH 5.4p1 OpenSSH honors the openssl config and will 
+use your default engines specified.
+
+REFERENCES
+  http://article.gmane.org/gmane.linux.kernel.cryptoapi/5292
+  http://article.gmane.org/gmane.linux.kernel.cryptoapi/5296
+  https://bugzilla.mindrot.org/show_bug.cgi?id=1707
+
+AUTHOR
+  Markus Kötter
