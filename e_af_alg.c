@@ -35,6 +35,8 @@
 static int af_alg_ciphers (ENGINE *e, const EVP_CIPHER **cipher, const int **nids, int nid);
 static int af_alg_aes_ciphers(EVP_CIPHER_CTX *ctx, unsigned char *out_arg, const unsigned char *in_arg, unsigned int nbytes);
 
+static int af_alg_digests(ENGINE *e, const EVP_MD **digest, const int **nids, int nid);
+
 #define DYNAMIC_ENGINE
 #define AF_ALG_ENGINE_ID	"af_alg"
 #define AF_ALG_ENGINE_NAME	"use AF_ALG for AES crypto"
@@ -71,7 +73,8 @@ static int af_alg_bind_helper(ENGINE * e)
 	if( !ENGINE_set_id(e, AF_ALG_ENGINE_ID) ||
 		!ENGINE_set_init_function(e, af_alg_init) ||
 		!ENGINE_set_name(e, AF_ALG_ENGINE_NAME) ||
-		!ENGINE_set_ciphers (e, af_alg_ciphers) )
+		!ENGINE_set_ciphers (e, af_alg_ciphers) ||
+		!ENGINE_set_digests (e, af_alg_digests))
 		return 0;
 	return 1;
 }
@@ -262,3 +265,112 @@ static int af_alg_ciphers(ENGINE *e, const EVP_CIPHER **cipher, const int **nids
 	return 1;
 }
 
+struct af_alg_digest_data
+{
+	int tfmfd;
+	int opfd;
+};
+
+#define DIGEST_DATA(ctx) ((struct af_alg_digest_data*)(ctx->md_data))
+
+static int af_alg_sha1_init(EVP_MD_CTX *ctx)
+{
+	struct af_alg_digest_data *ddata = DIGEST_DATA(ctx);
+	struct sockaddr_alg sa = {
+		.salg_family = AF_ALG,
+		.salg_type = "hash",
+		.salg_name = "sha1"
+	};
+
+	if( (ddata->tfmfd = socket(AF_ALG, SOCK_SEQPACKET, 0)) == -1 )
+		return 0;
+
+	if( bind(ddata->tfmfd, (struct sockaddr *)&sa, sizeof(sa)) != 0 )
+		return 0;
+
+	if( (ddata->opfd = accept(ddata->tfmfd,NULL,0)) == -1 )
+		return 0;
+
+	return 1;
+}
+
+static int af_alg_sha1_update(EVP_MD_CTX *ctx, const void *data, size_t length)
+{
+	struct af_alg_digest_data *ddata = DIGEST_DATA(ctx);
+	ssize_t r;
+	r = send(ddata->opfd, data, length, MSG_MORE);
+	if( r < 0 || (size_t)r < length )
+		return 0;
+	return 1;
+}
+
+static int af_alg_sha1_final(EVP_MD_CTX *ctx, unsigned char *md)
+{
+	struct af_alg_digest_data *ddata = DIGEST_DATA(ctx);
+	if( read(ddata->opfd, md, SHA_DIGEST_LENGTH) != SHA_DIGEST_LENGTH )
+		return 0;
+
+	return 1;
+}
+
+static int af_alg_sha1_copy(EVP_MD_CTX *_to,const EVP_MD_CTX *_from)
+{
+	struct af_alg_digest_data *from = DIGEST_DATA(_from);
+	struct af_alg_digest_data *to = DIGEST_DATA(_to);
+	if( (to->opfd = accept(from->opfd, NULL, 0)) == -1 )
+		return 0;
+	to->tfmfd = from->tfmfd; /* FIXME how to verify? */
+	return 1;
+}
+
+static int af_alg_sha1_cleanup(EVP_MD_CTX *ctx)
+{
+	struct af_alg_digest_data *ddata = DIGEST_DATA(ctx);
+	if( ddata->opfd != -1 )
+		close(ddata->opfd);
+	if( ddata->tfmfd != -1 )
+		close(ddata->tfmfd);
+	return 0;
+}
+
+static const EVP_MD af_alg_sha1_md = {
+	NID_sha1,
+	NID_sha1WithRSAEncryption,
+	SHA_DIGEST_LENGTH,
+	0,
+	af_alg_sha1_init,
+	af_alg_sha1_update,
+	af_alg_sha1_final,
+	af_alg_sha1_copy,
+	af_alg_sha1_cleanup,
+	EVP_PKEY_RSA_method,
+	SHA_CBLOCK,
+	sizeof(struct af_alg_digest_data),
+};
+
+static int af_alg_digest_nids[] = {
+	NID_sha1,
+};
+
+static int af_alg_digest_nids_num = sizeof(af_alg_digest_nids)/sizeof(af_alg_digest_nids[0]);
+
+static int af_alg_digests(ENGINE *e, const EVP_MD **digest, const int **nids, int nid)
+{
+	if( !digest )
+	{
+		*nids = af_alg_digest_nids;
+		return af_alg_digest_nids_num;
+	}
+
+	switch( nid )
+	{
+	case NID_sha1:
+		*digest = &af_alg_sha1_md;
+		break;
+	default:
+		*digest = NULL;
+		return 0;
+	}
+
+	return 1;
+}
