@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <sys/param.h>
 #include <ctype.h>
+#include <stdbool.h>
 
 #ifndef AF_ALG
 #define AF_ALG 38
@@ -43,6 +44,15 @@ static int af_alg_digests(ENGINE *e, const EVP_MD **digest, const int **nids, in
 
 #define EVP_CIPHER_block_size_CBC	AES_BLOCK_SIZE
 
+static bool nid_in_nids(int nid, int nids[], int num)
+{
+	int i=0;
+	for( i=0;i<num;i++ )
+		if( nids[i] == nid )
+			return true;
+	return false;
+}
+
 struct af_alg_cipher_data
 {
 	int tfmfd;
@@ -50,13 +60,22 @@ struct af_alg_cipher_data
 	__u32 type;
 };
 
-static int af_alg_cipher_nids[] = {
+static int af_alg_cipher_all_nids[] = {
 	NID_aes_128_cbc,
 	NID_aes_192_cbc,
 	NID_aes_256_cbc,
 };
+static int af_alg_cipher_all_nids_num = (sizeof(af_alg_cipher_all_nids)/sizeof(af_alg_cipher_all_nids[0]));
+static int *af_alg_digest_nids;
+static int af_alg_digest_nids_num;
 
-static int af_alg_cipher_nids_num = (sizeof(af_alg_cipher_nids)/sizeof(af_alg_cipher_nids[0]));
+static int af_alg_digest_all_nids[] = {
+	NID_sha1,
+};
+static int af_alg_digest_all_nids_num = sizeof(af_alg_digest_all_nids)/sizeof(af_alg_digest_all_nids[0]);
+static int *af_alg_cipher_nids;
+static int af_alg_cipher_nids_num;
+
 
 int af_alg_init(ENGINE * engine)
 {
@@ -67,14 +86,83 @@ int af_alg_init(ENGINE * engine)
 	return 1;
 }
 
+int af_alg_finish(ENGINE * engine)
+{
+	return 1;
+}
+/* The definitions for control commands specific to this engine */
+#define AF_ALG_CMD_CIPHERS	ENGINE_CMD_BASE
+#define AF_ALG_CMD_DIGESTS	(ENGINE_CMD_BASE + 1)
+
+static const ENGINE_CMD_DEFN af_alg_cmd_defns[] = {
+	{AF_ALG_CMD_CIPHERS,"CIPHERS","which ciphers to run",ENGINE_CMD_FLAG_STRING},
+	{AF_ALG_CMD_DIGESTS,"DIGESTS","which digests to run",ENGINE_CMD_FLAG_STRING},
+	{0, NULL, NULL, 0}
+};
+static int cipher_nid(const EVP_CIPHER *c)
+{
+	return EVP_CIPHER_nid(c);
+}
+static int digest_nid(const EVP_MD *d)
+{
+	return EVP_MD_type(d);
+}
+static bool names_to_nids(const char *names, const void*(*by_name)(const char *), int (*to_nid)(const void *), int **rnids, int *rnum, int *nids, int num)
+{
+	char *str, *r;
+	char *c = NULL;
+	r = str = strdup(names);
+	while( (c = strtok_r(r, " ", &r)) != NULL )
+	{
+		const void *ec = by_name(c);
+		if( ec == NULL )
+		{
+			continue;
+		}
+		if( nid_in_nids(to_nid(ec), nids, num) )
+		{
+			if((*rnids = realloc(*rnids, *rnum+1)) == NULL)
+				return false;
+			*rnids[*rnum]=to_nid(ec);
+			*rnum = *rnum+1;
+		}else
+		{
+			continue;
+		}
+	}
+	return true;
+}
+
+static int af_alg_ctrl(ENGINE *e, int cmd, long i, void *p, void (*f)())
+{
+	switch( cmd )
+	{
+	case AF_ALG_CMD_CIPHERS:
+		if( p == NULL )
+			return 1;
+		names_to_nids(p, (void *)EVP_get_cipherbyname, (void *)cipher_nid, &af_alg_cipher_nids, &af_alg_cipher_nids_num, af_alg_cipher_all_nids, af_alg_cipher_all_nids_num);
+		return 1;
+	case AF_ALG_CMD_DIGESTS:
+		if( p == NULL )
+			return 1;
+		names_to_nids(p, (void *)EVP_get_digestbyname, (void *)digest_nid, &af_alg_digest_nids, &af_alg_digest_nids_num, af_alg_digest_all_nids, af_alg_digest_all_nids_num);
+		return 1;
+	default:
+		break;
+	}
+	return 0;
+}
 
 static int af_alg_bind_helper(ENGINE * e)
 {
 	if( !ENGINE_set_id(e, AF_ALG_ENGINE_ID) ||
 		!ENGINE_set_init_function(e, af_alg_init) ||
+		!ENGINE_set_finish_function(e, af_alg_finish) ||
 		!ENGINE_set_name(e, AF_ALG_ENGINE_NAME) ||
 		!ENGINE_set_ciphers (e, af_alg_ciphers) ||
-		!ENGINE_set_digests (e, af_alg_digests))
+		!ENGINE_set_digests (e, af_alg_digests) ||
+		!ENGINE_set_ctrl_function(e, af_alg_ctrl) ||
+		!ENGINE_set_cmd_defns(e, af_alg_cmd_defns))
 		return 0;
 	return 1;
 }
@@ -114,12 +202,9 @@ static int af_alg_aes_init_key (EVP_CIPHER_CTX *ctx, const unsigned char *key, c
 	
 	struct sockaddr_alg sa = {
 		.salg_family = AF_ALG,
+		.salg_type = "skcipher",
+		.salg_name = "cbc(aes)",
 	};
-
-	const char *type = "skcipher";
-	const char *name = "cbc(aes)";
-	strncpy((char *)sa.salg_type, type, strlen(type));
-	strncpy((char *)sa.salg_name, name, strlen(name));
 
 	acd->op = -1;
 
@@ -247,6 +332,10 @@ static int af_alg_ciphers(ENGINE *e, const EVP_CIPHER **cipher, const int **nids
 		*nids = af_alg_cipher_nids;
 		return af_alg_cipher_nids_num;
 	}
+
+	if( ! nid_in_nids(nid, af_alg_cipher_nids, af_alg_cipher_nids_num) )
+		return 0;
+
 	switch( nid )
 	{
 	case NID_aes_128_cbc:
@@ -260,9 +349,8 @@ static int af_alg_ciphers(ENGINE *e, const EVP_CIPHER **cipher, const int **nids
 		break;
 	default:
 		*cipher = NULL;
-		return 0;
 	}
-	return 1;
+	return(*cipher != 0);
 }
 
 struct af_alg_digest_data
@@ -348,11 +436,6 @@ static const EVP_MD af_alg_sha1_md = {
 	sizeof(struct af_alg_digest_data),
 };
 
-static int af_alg_digest_nids[] = {
-	NID_sha1,
-};
-
-static int af_alg_digest_nids_num = sizeof(af_alg_digest_nids)/sizeof(af_alg_digest_nids[0]);
 
 static int af_alg_digests(ENGINE *e, const EVP_MD **digest, const int **nids, int nid)
 {
@@ -362,6 +445,9 @@ static int af_alg_digests(ENGINE *e, const EVP_MD **digest, const int **nids, in
 		return af_alg_digest_nids_num;
 	}
 
+	if( nid_in_nids(nid, af_alg_digest_nids, af_alg_digest_nids_num) == false )
+		return 0;
+
 	switch( nid )
 	{
 	case NID_sha1:
@@ -369,8 +455,7 @@ static int af_alg_digests(ENGINE *e, const EVP_MD **digest, const int **nids, in
 		break;
 	default:
 		*digest = NULL;
-		return 0;
 	}
-
-	return 1;
+	return (*digest != NULL);
 }
+
