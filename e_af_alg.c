@@ -141,11 +141,15 @@ static int af_alg_ctrl(ENGINE *e, int cmd, long i, void *p, void (*f)())
 		if( p == NULL )
 			return 1;
 		names_to_nids(p, (void *)EVP_get_cipherbyname, (void *)cipher_nid, &af_alg_cipher_nids, &af_alg_cipher_nids_num, af_alg_cipher_all_nids, af_alg_cipher_all_nids_num);
+		ENGINE_unregister_ciphers(e);
+		ENGINE_register_ciphers(e);
 		return 1;
 	case AF_ALG_CMD_DIGESTS:
 		if( p == NULL )
 			return 1;
 		names_to_nids(p, (void *)EVP_get_digestbyname, (void *)digest_nid, &af_alg_digest_nids, &af_alg_digest_nids_num, af_alg_digest_all_nids, af_alg_digest_all_nids_num);
+		ENGINE_unregister_digests(e);
+		ENGINE_register_digests(e);
 		return 1;
 	default:
 		break;
