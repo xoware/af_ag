@@ -425,21 +425,23 @@ static int af_alg_sha1_cleanup(EVP_MD_CTX *ctx)
 	return 0;
 }
 
-static const EVP_MD af_alg_sha1_md = {
-	NID_sha1,
-	NID_sha1WithRSAEncryption,
-	SHA_DIGEST_LENGTH,
-	0,
-	af_alg_sha1_init,
-	af_alg_sha1_update,
-	af_alg_sha1_final,
-	af_alg_sha1_copy,
-	af_alg_sha1_cleanup,
-	EVP_PKEY_RSA_method,
-	SHA_CBLOCK,
-	sizeof(struct af_alg_digest_data),
+#define	DECLARE_MD_SHA(digest) \
+static const EVP_MD af_alg_##digest##_md = {    \
+	NID_##digest,                               \
+	NID_##digest##WithRSAEncryption,            \
+	SHA_DIGEST_LENGTH,                          \
+	0,                                          \
+	af_alg_##digest##_init,                     \
+	af_alg_##digest##_update,                   \
+	af_alg_##digest##_final,                    \
+	af_alg_##digest##_copy,                     \
+	af_alg_##digest##_cleanup,                  \
+	EVP_PKEY_RSA_method,                        \
+	SHA_CBLOCK,                                 \
+	sizeof(struct af_alg_digest_data),          \
 };
 
+DECLARE_MD_SHA(sha1)
 
 static int af_alg_digests(ENGINE *e, const EVP_MD **digest, const int **nids, int nid)
 {
