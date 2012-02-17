@@ -167,8 +167,14 @@ static bool names_to_nids(const char *names, const void*(*by_name)(const char *)
 	while( (c = strtok_r(r, " ", &r)) != NULL )
 	{
 		const void *ec = by_name(c);
-		if( ec == NULL || nid_in_nids(to_nid(ec), nids, num) == false)
-			continue;
+		if( ec == NULL )
+			/* the cipher/digest is unknown */
+			return false;
+
+		if( nid_in_nids(to_nid(ec), nids, num) == false )
+			/* we do not support the cipher */
+			return false;
+
 		if((*rnids = realloc(*rnids, (*rnum+1)*sizeof(int))) == NULL)
 			return false;
 		(*rnids)[*rnum]=to_nid(ec);
@@ -184,14 +190,16 @@ static int af_alg_ctrl(ENGINE *e, int cmd, long i, void *p, void (*f)())
 	case AF_ALG_CMD_CIPHERS:
 		if( p == NULL )
 			return 1;
-		names_to_nids(p, (void *)EVP_get_cipherbyname, (void *)cipher_nid, &af_alg_cipher_nids, &af_alg_cipher_nids_num, af_alg_cipher_all_nids, af_alg_cipher_all_nids_num);
+		if( names_to_nids(p, (void *)EVP_get_cipherbyname, (void *)cipher_nid, &af_alg_cipher_nids, &af_alg_cipher_nids_num, af_alg_cipher_all_nids, af_alg_cipher_all_nids_num) == false )
+			return 0;
 		ENGINE_unregister_ciphers(e);
 		ENGINE_register_ciphers(e);
 		return 1;
 	case AF_ALG_CMD_DIGESTS:
 		if( p == NULL )
 			return 1;
-		names_to_nids(p, (void *)EVP_get_digestbyname, (void *)digest_nid, &af_alg_digest_nids, &af_alg_digest_nids_num, af_alg_digest_all_nids, af_alg_digest_all_nids_num);
+		if( names_to_nids(p, (void *)EVP_get_digestbyname, (void *)digest_nid, &af_alg_digest_nids, &af_alg_digest_nids_num, af_alg_digest_all_nids, af_alg_digest_all_nids_num) == false )
+			return 0;
 		ENGINE_unregister_digests(e);
 		ENGINE_register_digests(e);
 		return 1;
