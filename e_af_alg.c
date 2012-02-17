@@ -118,15 +118,15 @@ static int af_alg_cipher_all_nids[] = {
 	NID_aes_256_cbc,
 };
 static int af_alg_cipher_all_nids_num = (sizeof(af_alg_cipher_all_nids)/sizeof(af_alg_cipher_all_nids[0]));
-static int *af_alg_digest_nids;
-static int af_alg_digest_nids_num;
+static int *af_alg_digest_nids = NULL;
+static int af_alg_digest_nids_num = 0;
 
 static int af_alg_digest_all_nids[] = {
 	NID_sha1,
 };
 static int af_alg_digest_all_nids_num = sizeof(af_alg_digest_all_nids)/sizeof(af_alg_digest_all_nids[0]);
-static int *af_alg_cipher_nids;
-static int af_alg_cipher_nids_num;
+static int *af_alg_cipher_nids = NULL;
+static int af_alg_cipher_nids_num = 0;
 
 
 int af_alg_init(ENGINE * engine)
@@ -167,20 +167,12 @@ static bool names_to_nids(const char *names, const void*(*by_name)(const char *)
 	while( (c = strtok_r(r, " ", &r)) != NULL )
 	{
 		const void *ec = by_name(c);
-		if( ec == NULL )
-		{
+		if( ec == NULL || nid_in_nids(to_nid(ec), nids, num) == false)
 			continue;
-		}
-		if( nid_in_nids(to_nid(ec), nids, num) )
-		{
-			if((*rnids = realloc(*rnids, *rnum+1)) == NULL)
-				return false;
-			*rnids[*rnum]=to_nid(ec);
-			*rnum = *rnum+1;
-		}else
-		{
-			continue;
-		}
+		if((*rnids = realloc(*rnids, (*rnum+1)*sizeof(int))) == NULL)
+			return false;
+		(*rnids)[*rnum]=to_nid(ec);
+		*rnum = *rnum+1;
 	}
 	return true;
 }
