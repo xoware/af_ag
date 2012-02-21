@@ -185,6 +185,7 @@ static bool names_to_nids(const char *names, const void*(*by_name)(const char *)
 
 static int af_alg_ctrl(ENGINE *e, int cmd, long i, void *p, void (*f)())
 {
+	OpenSSL_add_all_algorithms();
 	switch( cmd )
 	{
 	case AF_ALG_CMD_CIPHERS:
