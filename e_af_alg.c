@@ -464,7 +464,8 @@ static int af_alg_sha1_copy(EVP_MD_CTX *_to,const EVP_MD_CTX *_from)
 	struct af_alg_digest_data *to = DIGEST_DATA(_to);
 	if( (to->opfd = accept(from->opfd, NULL, 0)) == -1 )
 		return 0;
-	to->tfmfd = from->tfmfd; /* FIXME how to verify? */
+	if( (to->tfmfd = accept(from->tfmfd, NULL, 0)) == -1 )
+		return 0;
 	return 1;
 }
 
